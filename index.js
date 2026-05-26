@@ -57,8 +57,25 @@ const start = async () => {
     const mongoUri = process.env.MONGODB_URI || process.env.MongoDB_URI || process.env.MONGO_URI;
     try {
         if (mongoUri && typeof mongoUri === 'string') {
-            await mongoose.connect(mongoUri, {});
-            console.log('Connected to MongoDB');
+            try {
+                await mongoose.connect(mongoUri, {});
+                console.log('Connected to MongoDB');
+            } catch (err) {
+                // If the parse error is caused by a missing scheme, try a tolerant retry
+                const needsScheme = !/^mongodb(?:\+srv)?:\/\//i.test(mongoUri);
+                if (needsScheme) {
+                    const tryUri = 'mongodb+srv://' + mongoUri;
+                    try {
+                        await mongoose.connect(tryUri, {});
+                        console.log('Connected to MongoDB (auto-added mongodb+srv://)');
+                    } catch (err2) {
+                        console.error('Failed to connect to MongoDB after adding scheme. Please set a valid MongoDB connection string environment variable starting with "mongodb://" or "mongodb+srv://".');
+                        console.error(err2.message);
+                    }
+                } else {
+                    console.error('Failed to connect to MongoDB:', err.message);
+                }
+            }
         } else {
             console.warn('No MongoDB URI provided. Running without database (in-memory mode).');
         }
@@ -67,7 +84,7 @@ const start = async () => {
             console.log(`Server running on port ${port}`);
         });
     } catch (error) {
-        console.error('Failed to connect to MongoDB', error);
+        console.error('Unexpected error while initializing server', error);
         app.listen(port, () => {
             console.log(`Server running on port ${port} (DB unavailable)`);
         });
