@@ -1,13 +1,7 @@
 const bcrypt = require('bcryptjs');
 const ApiError = require('../utils/apiError');
 const jwtHelper = require('../utils/jwtHelper');
-const {
-    findUserByEmailAndRole,
-    addUser,
-    findUserByRefreshToken,
-    setRefreshTokenForUser,
-    clearRefreshTokenForUser
-} = require('../data/userData');
+const User = require('../models/User');
 
 const validateAuthPayload = ({ email, password, confirmPassword }, isSignup = false) => {
     if (!email || !password) {
@@ -27,7 +21,7 @@ const validateAuthPayload = ({ email, password, confirmPassword }, isSignup = fa
 exports.authenticateUser = async ({ email, password }, role) => {
     validateAuthPayload({ email, password }, false);
 
-    const user = findUserByEmailAndRole(email, role);
+    const user = await User.findOne({ email: email.toLowerCase(), role });
     if (!user) {
         const roleLabel = role === 'moderator' ? 'moderator' : 'student';
         throw new ApiError(401, `Invalid ${roleLabel} credentials.`);
@@ -45,7 +39,8 @@ exports.authenticateUser = async ({ email, password }, role) => {
 exports.registerUser = async ({ email, password, confirmPassword }, role) => {
     validateAuthPayload({ email, password, confirmPassword }, true);
 
-    if (findUserByEmailAndRole(email, role)) {
+    const existing = await User.findOne({ email: email.toLowerCase(), role });
+    if (existing) {
         const roleLabel = role === 'moderator' ? 'Moderator' : 'Student';
         throw new ApiError(409, `${roleLabel} account already exists.`);
     }
@@ -60,19 +55,21 @@ exports.registerUser = async ({ email, password, confirmPassword }, role) => {
 
     const hashedPassword = await bcrypt.hash(password, 10);
 
-    return addUser({
-        email,
+    const newUser = new User({
+        email: email.toLowerCase(),
         password: hashedPassword,
         displayName,
         avatarGradient,
         isAdmin: role === 'moderator',
         role
     });
+
+    return await newUser.save();
 };
 
 exports.createTokens = async (user) => {
     const payload = {
-        id: user.id,
+        id: user.id || user._id.toString(),
         email: user.email,
         displayName: user.displayName,
         isAdmin: user.isAdmin,
@@ -81,7 +78,8 @@ exports.createTokens = async (user) => {
 
     const accessToken = jwtHelper.signAccessToken(payload);
     const refreshToken = jwtHelper.signRefreshToken(payload);
-    setRefreshTokenForUser(user.id, refreshToken);
+    
+    await User.findByIdAndUpdate(user.id || user._id, { refreshToken });
 
     return { accessToken, refreshToken };
 };
@@ -97,7 +95,7 @@ exports.refreshTokens = async (refreshToken) => {
         throw new ApiError(401, 'Invalid refresh token.');
     }
 
-    const user = findUserByRefreshToken(refreshToken);
+    const user = await User.findOne({ refreshToken });
     if (!user) {
         throw new ApiError(401, 'Refresh token expired or invalid.');
     }
@@ -111,5 +109,5 @@ exports.logoutUser = async (refreshToken) => {
         return;
     }
 
-    clearRefreshTokenForUser(refreshToken);
+    await User.findOneAndUpdate({ refreshToken }, { refreshToken: null });
 };

@@ -1,19 +1,33 @@
 const ApiError = require('../utils/apiError');
-const { getAllPosts, findPostById, addPost, updatePostById, deletePostById } = require('../data/postData');
+const Post = require('../models/Post');
+
+const formatRelativeTime = (date) => {
+    if (!date) return 'Just now';
+    const now = new Date();
+    const diffMs = now - new Date(date);
+    const diffMins = Math.floor(diffMs / 60000);
+    const diffHours = Math.floor(diffMins / 60);
+    const diffDays = Math.floor(diffHours / 24);
+
+    if (diffMins < 1) return 'Just now';
+    if (diffMins < 60) return `${diffMins}m ago`;
+    if (diffHours < 24) return `${diffHours}h ago`;
+    return `${diffDays}d ago`;
+};
 
 const buildPostResponse = (post, userId) => {
     const comments = post.comments.map((comment) => ({
-        id: comment.id,
+        id: comment._id ? comment._id.toString() : comment.id,
         author: comment.author,
         avatarGradient: comment.avatarGradient,
         content: comment.content,
-        timestamp: comment.timestamp,
+        timestamp: comment.createdAt ? formatRelativeTime(comment.createdAt) : (comment.timestamp || 'Just now'),
         likes: comment.likes,
-        userLiked: userId ? comment.likedBy.includes(userId) : false
+        userLiked: userId ? comment.likedBy.includes(userId.toString()) : false
     }));
 
     return {
-        id: post.id,
+        id: post._id ? post._id.toString() : post.id,
         content: post.content,
         category: post.category,
         author: post.author,
@@ -24,9 +38,9 @@ const buildPostResponse = (post, userId) => {
         comments,
         commentsCount: comments.length,
         reports: post.reports,
-        timestamp: post.timestamp,
+        timestamp: post.createdAt ? formatRelativeTime(post.createdAt) : (post.timestamp || 'Just now'),
         isReported: post.isReported,
-        userVote: userId ? (post.votesByUser?.[userId] || null) : null
+        userVote: userId ? (post.votesByUser instanceof Map ? post.votesByUser.get(userId.toString()) : post.votesByUser?.[userId.toString()] || null) : null
     };
 };
 
@@ -36,13 +50,14 @@ const trendingGradients = [
     'from-[#c4c6d3] to-[#c5c6ce]'
 ];
 
-exports.listTrending = () => {
-    return getAllPosts()
+exports.listTrending = async () => {
+    const posts = await Post.find().exec();
+    return posts
         .slice()
         .sort((a, b) => (b.upvotes + b.comments.length) - (a.upvotes + a.comments.length))
         .slice(0, 3)
         .map((post, index) => ({
-            id: post.id,
+            id: post._id.toString(),
             content: post.content,
             category: post.category,
             author: post.author,
@@ -51,47 +66,47 @@ exports.listTrending = () => {
         }));
 };
 
-exports.listPosts = (userId, page = 1, limit = 10) => {
-    const all = getAllPosts().map((post) => buildPostResponse(post, userId));
+exports.listPosts = async (userId, page = 1, limit = 10) => {
     const start = (page - 1) * limit;
-    return all.slice(start, start + limit);
+    const posts = await Post.find().sort({ createdAt: -1 }).skip(start).limit(limit);
+    return posts.map((post) => buildPostResponse(post, userId));
 };
 
-exports.getPost = (postId, userId) => {
-    const post = findPostById(postId);
+exports.getPost = async (postId, userId) => {
+    const post = await Post.findById(postId);
     if (!post) {
         throw new ApiError(404, 'Post not found.');
     }
     return buildPostResponse(post, userId);
 };
 
-exports.createPost = ({ content, category, author, authorType, avatarGradient }, userId) => {
+exports.createPost = async ({ content, category, author, authorType, avatarGradient }, userId) => {
     if (!content || !category) {
         throw new ApiError(400, 'Post content and category are required.');
     }
 
-    const newPost = {
-        id: `post-${Date.now()}`,
+    const initialVotes = userId ? { [userId.toString()]: 'up' } : {};
+
+    const newPost = new Post({
         content,
         category,
         author,
         authorType,
         avatarGradient,
-        upvotes: 1,
+        upvotes: userId ? 1 : 0,
         downvotes: 0,
         comments: [],
         reports: 0,
-        timestamp: 'Just now',
         isReported: false,
-        votesByUser: userId ? { [userId]: 'up' } : {},
-        userVote: userId ? 'up' : null
-    };
+        votesByUser: initialVotes
+    });
 
-    return buildPostResponse(addPost(newPost), userId);
+    const savedPost = await newPost.save();
+    return buildPostResponse(savedPost, userId);
 };
 
-exports.votePost = (postId, direction, userId) => {
-    const post = findPostById(postId);
+exports.votePost = async (postId, direction, userId) => {
+    const post = await Post.findById(postId);
     if (!post) {
         throw new ApiError(404, 'Post not found.');
     }
@@ -99,104 +114,113 @@ exports.votePost = (postId, direction, userId) => {
         throw new ApiError(400, 'Vote direction must be up or down.');
     }
 
-    const previousVote = userId ? post.votesByUser[userId] : null;
-
-    if (userId) {
-        if (previousVote === direction) {
-            if (direction === 'up') post.upvotes -= 1;
-            if (direction === 'down') post.downvotes -= 1;
-            delete post.votesByUser[userId];
-        } else {
-            if (previousVote === 'up') post.upvotes -= 1;
-            if (previousVote === 'down') post.downvotes -= 1;
-            if (direction === 'up') post.upvotes += 1;
-            if (direction === 'down') post.downvotes += 1;
-            post.votesByUser[userId] = direction;
-        }
-    } else {
+    if (!userId) {
         if (direction === 'up') post.upvotes += 1;
         if (direction === 'down') post.downvotes += 1;
+    } else {
+        const uId = userId.toString();
+        if (!post.votesByUser) {
+            post.votesByUser = new Map();
+        }
+
+        const previousVote = post.votesByUser.get(uId);
+
+        if (previousVote === direction) {
+            if (direction === 'up') post.upvotes = Math.max(0, post.upvotes - 1);
+            if (direction === 'down') post.downvotes = Math.max(0, post.downvotes - 1);
+            post.votesByUser.delete(uId);
+        } else {
+            if (previousVote === 'up') post.upvotes = Math.max(0, post.upvotes - 1);
+            if (previousVote === 'down') post.downvotes = Math.max(0, post.downvotes - 1);
+            if (direction === 'up') post.upvotes += 1;
+            if (direction === 'down') post.downvotes += 1;
+            post.votesByUser.set(uId, direction);
+        }
     }
 
-    return buildPostResponse(post, userId);
+    post.markModified('votesByUser');
+    const savedPost = await post.save();
+    return buildPostResponse(savedPost, userId);
 };
 
-exports.reportPost = (postId) => {
-    const post = findPostById(postId);
+exports.reportPost = async (postId) => {
+    const post = await Post.findById(postId);
     if (!post) {
         throw new ApiError(404, 'Post not found.');
     }
     post.reports += 1;
     post.isReported = true;
-    return buildPostResponse(post, null);
+    const savedPost = await post.save();
+    return buildPostResponse(savedPost, null);
 };
 
-exports.addComment = (postId, { content, author, avatarGradient }) => {
+exports.addComment = async (postId, { content, author, avatarGradient }) => {
     if (!content) {
         throw new ApiError(400, 'Comment content is required.');
     }
 
-    const post = findPostById(postId);
+    const post = await Post.findById(postId);
     if (!post) {
         throw new ApiError(404, 'Post not found.');
     }
 
-    const newComment = {
-        id: `comment-${Date.now()}`,
+    post.comments.push({
         author,
         avatarGradient,
         content,
-        timestamp: 'Just now',
         likes: 0,
         likedBy: []
-    };
+    });
 
-    post.comments.push(newComment);
-    return buildPostResponse(post, null);
+    const savedPost = await post.save();
+    return buildPostResponse(savedPost, null);
 };
 
-exports.toggleCommentLike = (postId, commentId, userId) => {
+exports.toggleCommentLike = async (postId, commentId, userId) => {
     if (!userId) {
         throw new ApiError(401, 'Authentication required to like comments.');
     }
 
-    const post = findPostById(postId);
+    const post = await Post.findById(postId);
     if (!post) {
         throw new ApiError(404, 'Post not found.');
     }
 
-    const comment = post.comments.find((item) => item.id === commentId);
+    const comment = post.comments.id(commentId);
     if (!comment) {
         throw new ApiError(404, 'Comment not found.');
     }
 
-    const alreadyLiked = comment.likedBy.includes(userId);
+    const uId = userId.toString();
+    const alreadyLiked = comment.likedBy.includes(uId);
 
     if (alreadyLiked) {
-        comment.likedBy = comment.likedBy.filter((id) => id !== userId);
+        comment.likedBy = comment.likedBy.filter((id) => id !== uId);
         comment.likes = Math.max(comment.likes - 1, 0);
     } else {
-        comment.likedBy.push(userId);
+        comment.likedBy.push(uId);
         comment.likes += 1;
     }
 
-    return buildPostResponse(post, userId);
+    const savedPost = await post.save();
+    return buildPostResponse(savedPost, userId);
 };
 
-exports.keepPost = (postId) => {
-    const post = findPostById(postId);
+exports.keepPost = async (postId) => {
+    const post = await Post.findById(postId);
     if (!post) {
         throw new ApiError(404, 'Post not found.');
     }
 
     post.reports = 0;
     post.isReported = false;
-    return buildPostResponse(post, null);
+    const savedPost = await post.save();
+    return buildPostResponse(savedPost, null);
 };
 
-exports.deletePost = (postId) => {
-    const deleted = deletePostById(postId);
-    if (!deleted) {
+exports.deletePost = async (postId) => {
+    const result = await Post.findByIdAndDelete(postId);
+    if (!result) {
         throw new ApiError(404, 'Post not found.');
     }
     return true;

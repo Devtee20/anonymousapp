@@ -88,15 +88,24 @@ exports.logout = async (req, res, next) => {
   }
 };
 
-exports.loginGuest = async (req, res) => {
-  const gradients = ['from-blue-500 to-indigo-500', 'from-cyan-500 to-blue-600', 'from-violet-500 to-fuchsia-600'];
-  const guestUser = {
-    email: `guest-${Date.now()}@university.edu`,
-    displayName: 'Anonymous Guest',
-    avatarGradient: gradients[Math.floor(Math.random() * gradients.length)],
-    isAdmin: false,
-    role: 'guest'
-  };
+exports.loginGuest = async (req, res, next) => {
+  try {
+    const gradients = ['from-blue-500 to-indigo-500', 'from-cyan-500 to-blue-600', 'from-violet-500 to-fuchsia-600'];
+    const guestUser = {
+      email: `guest-${Date.now()}@university.edu`,
+      displayName: 'Anonymous Guest',
+      avatarGradient: gradients[Math.floor(Math.random() * gradients.length)],
+      isAdmin: false,
+      role: 'guest'
+    };
 
-  return res.json({ user: guestUser });
+    const User = require('../models/User');
+    const user = await new User(guestUser).save();
+    const { accessToken, refreshToken } = await authService.createTokens(user);
+    setRefreshCookie(res, refreshToken);
+
+    return res.json({ user: buildSession(user), accessToken });
+  } catch (error) {
+    return next(error);
+  }
 };
