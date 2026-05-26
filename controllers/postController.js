@@ -3,7 +3,9 @@ const postService = require('../services/postService');
 
 exports.listPosts = async (req, res, next) => {
     try {
-        const posts = postService.listPosts(req.user?.id);
+        const page = parseInt(req.query.page, 10) || 1;
+        const limit = parseInt(req.query.limit, 10) || 10;
+        const posts = postService.listPosts(req.user?.id, page, limit);
         return res.json(posts);
     } catch (error) {
         return next(error);

@@ -51,8 +51,10 @@ exports.listTrending = () => {
         }));
 };
 
-exports.listPosts = (userId) => {
-    return getAllPosts().map((post) => buildPostResponse(post, userId));
+exports.listPosts = (userId, page = 1, limit = 10) => {
+    const all = getAllPosts().map((post) => buildPostResponse(post, userId));
+    const start = (page - 1) * limit;
+    return all.slice(start, start + limit);
 };
 
 exports.getPost = (postId, userId) => {
