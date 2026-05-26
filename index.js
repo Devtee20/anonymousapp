@@ -54,7 +54,7 @@ app.use(errorHandler);
 
 
 const start = async () => {
-    const mongoUri = process.env.MONGODB_URI || process.env.MongoDB_URI || process.env.MONGO_URI;
+    const mongoUri = process.env.MongoDB_URI || process.env.MongoDB_URI || process.env.MONGO_URI;
     try {
         if (mongoUri && typeof mongoUri === 'string') {
             try {
