@@ -5,7 +5,8 @@ const buildSession = (user) => ({
   email: user.email,
   displayName: user.displayName,
   avatarGradient: user.avatarGradient,
-  isAdmin: user.isAdmin,
+  isAdmin: user.isAdmin || user.isSuperAdmin || user.role === 'moderator' || user.role === 'superadmin',
+  isSuperAdmin: user.isSuperAdmin || user.role === 'superadmin',
   role: user.role
 });
 
@@ -32,6 +33,17 @@ exports.loginStudent = async (req, res, next) => {
 exports.loginModerator = async (req, res, next) => {
   try {
     const user = await authService.authenticateUser(req.body, 'moderator');
+    const { accessToken, refreshToken } = await authService.createTokens(user);
+    setRefreshCookie(res, refreshToken);
+    return res.json({ user: buildSession(user), accessToken });
+  } catch (error) {
+    return next(error);
+  }
+};
+
+exports.loginSuperAdmin = async (req, res, next) => {
+  try {
+    const user = await authService.authenticateUser(req.body, 'superadmin');
     const { accessToken, refreshToken } = await authService.createTokens(user);
     setRefreshCookie(res, refreshToken);
     return res.json({ user: buildSession(user), accessToken });

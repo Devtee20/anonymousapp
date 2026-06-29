@@ -27,3 +27,10 @@ exports.requireAdmin = (req, res, next) => {
     }
     next();
 };
+
+exports.requireSuperAdmin = (req, res, next) => {
+    if (!req.user || !req.user.isSuperAdmin) {
+        return next(new ApiError(403, 'Super admin access required.'));
+    }
+    next();
+};

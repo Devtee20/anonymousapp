@@ -23,13 +23,13 @@ exports.authenticateUser = async ({ email, password }, role) => {
 
     const user = await User.findOne({ email: email.toLowerCase(), role });
     if (!user) {
-        const roleLabel = role === 'moderator' ? 'moderator' : 'student';
+        const roleLabel = role === 'moderator' ? 'moderator' : role === 'superadmin' ? 'super admin' : 'student';
         throw new ApiError(401, `Invalid ${roleLabel} credentials.`);
     }
 
     const passwordMatches = await bcrypt.compare(password, user.password);
     if (!passwordMatches) {
-        const roleLabel = role === 'moderator' ? 'moderator' : 'student';
+        const roleLabel = role === 'moderator' ? 'moderator' : role === 'superadmin' ? 'super admin' : 'student';
         throw new ApiError(401, `Invalid ${roleLabel} credentials.`);
     }
 
@@ -39,20 +39,17 @@ exports.authenticateUser = async ({ email, password }, role) => {
 exports.registerUser = async ({ email, password, confirmPassword }, role) => {
     validateAuthPayload({ email, password, confirmPassword }, true);
 
-    const existing = await User.findOne({ email: email.toLowerCase(), role });
-    if (existing) {
-        const roleLabel = role === 'moderator' ? 'Moderator' : 'Student';
-        throw new ApiError(409, `${roleLabel} account already exists.`);
+    if (role === 'moderator' || role === 'superadmin') {
+        throw new ApiError(403, 'Moderator and super admin accounts must be created by the super admin.');
     }
 
-    const displayName = role === 'moderator'
-        ? 'Anonymous Moderator'
-        : `Anonymous ${email.split('@')[0]}`;
+    const existing = await User.findOne({ email: email.toLowerCase(), role });
+    if (existing) {
+        throw new ApiError(409, 'Student account already exists.');
+    }
 
-    const avatarGradient = role === 'moderator'
-        ? 'from-purple-600 to-indigo-800'
-        : 'from-violet-600 to-pink-500';
-
+    const displayName = `Anonymous ${email.split('@')[0]}`;
+    const avatarGradient = 'from-violet-600 to-pink-500';
     const hashedPassword = await bcrypt.hash(password, 10);
 
     const newUser = new User({
@@ -60,7 +57,7 @@ exports.registerUser = async ({ email, password, confirmPassword }, role) => {
         password: hashedPassword,
         displayName,
         avatarGradient,
-        isAdmin: role === 'moderator',
+        isAdmin: false,
         role
     });
 
@@ -72,13 +69,14 @@ exports.createTokens = async (user) => {
         id: user.id || user._id.toString(),
         email: user.email,
         displayName: user.displayName,
-        isAdmin: user.isAdmin,
+        isAdmin: user.isAdmin || user.isSuperAdmin || user.role === 'superadmin' || user.role === 'moderator',
+        isSuperAdmin: user.isSuperAdmin || user.role === 'superadmin',
         role: user.role
     };
 
     const accessToken = jwtHelper.signAccessToken(payload);
     const refreshToken = jwtHelper.signRefreshToken(payload);
-    
+
     await User.findByIdAndUpdate(user.id || user._id, { refreshToken });
 
     return { accessToken, refreshToken };
@@ -110,4 +108,40 @@ exports.logoutUser = async (refreshToken) => {
     }
 
     await User.findOneAndUpdate({ refreshToken }, { refreshToken: null });
+};
+
+exports.ensureSuperAdmin = async () => {
+    const adminEmail = process.env.ADMIN_GMAIL;
+    const adminPassword = process.env.ADMIN;
+
+    if (!adminEmail || !adminPassword) {
+        return null;
+    }
+
+    const existing = await User.findOne({ role: 'superadmin' });
+    const hashedPassword = await bcrypt.hash(adminPassword, 10);
+
+    if (existing) {
+        existing.email = adminEmail.toLowerCase();
+        existing.password = hashedPassword;
+        existing.displayName = 'Super Admin';
+        existing.avatarGradient = 'from-violet-600 to-indigo-900';
+        existing.isAdmin = true;
+        existing.isSuperAdmin = true;
+        existing.role = 'superadmin';
+        await existing.save();
+        return existing;
+    }
+
+    const superAdmin = await new User({
+        email: adminEmail.toLowerCase(),
+        password: hashedPassword,
+        displayName: 'Super Admin',
+        avatarGradient: 'from-violet-600 to-indigo-900',
+        isAdmin: true,
+        isSuperAdmin: true,
+        role: 'superadmin'
+    }).save();
+
+    return superAdmin;
 };

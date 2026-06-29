@@ -3,6 +3,7 @@ const express = require('express');
 const cookieParser = require('cookie-parser');
 const authRoutes = require('./routes/authRoutes');
 const postRoutes = require('./routes/postRoutes');
+const adminRoutes = require('./routes/adminRoutes');
 const cors = require('cors');
 const { notFoundHandler, errorHandler } = require('./middleware/errorHandler');
 const mongoose = require('mongoose');
@@ -44,6 +45,7 @@ app.use(cors(corsOptions));
 
 app.use('/api/auth', authRoutes);
 app.use('/api/posts', postRoutes);
+app.use('/api/admin', adminRoutes);
 
 app.get('/api', (req, res) => {
     res.json({ status: 'backend is running' });
@@ -80,11 +82,17 @@ const start = async () => {
             console.warn('No MongoDB URI provided. Running without database (in-memory mode).');
         }
 
+        const authService = require('./services/authService');
+        await authService.ensureSuperAdmin();
+
         app.listen(port, () => {
             console.log(`Server running on port ${port}`);
         });
     } catch (error) {
         console.error('Unexpected error while initializing server', error);
+        const authService = require('./services/authService');
+        await authService.ensureSuperAdmin();
+
         app.listen(port, () => {
             console.log(`Server running on port ${port} (DB unavailable)`);
         });

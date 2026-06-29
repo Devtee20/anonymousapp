@@ -6,7 +6,9 @@ const userSchema = new mongoose.Schema({
   displayName: { type: String },
   avatarGradient: { type: String },
   isAdmin: { type: Boolean, default: false },
-  role: { type: String, enum: ['student', 'moderator', 'guest'], default: 'student' },
+  isSuperAdmin: { type: Boolean, default: false },
+  role: { type: String, enum: ['student', 'moderator', 'superadmin', 'guest'], default: 'student' },
+  moderatorId: { type: String, default: null },
   refreshToken: { type: String, default: null }
 }, {
   timestamps: true
