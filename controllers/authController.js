@@ -30,6 +30,17 @@ exports.loginStudent = async (req, res, next) => {
   }
 };
 
+exports.login = async (req, res, next) => {
+  try {
+    const user = await authService.authenticateAnyRole(req.body);
+    const { accessToken, refreshToken } = await authService.createTokens(user);
+    setRefreshCookie(res, refreshToken);
+    return res.json({ user: buildSession(user), accessToken });
+  } catch (error) {
+    return next(error);
+  }
+};
+
 exports.loginModerator = async (req, res, next) => {
   try {
     const user = await authService.authenticateUser(req.body, 'moderator');

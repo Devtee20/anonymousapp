@@ -36,6 +36,26 @@ exports.authenticateUser = async ({ email, password }, role) => {
     return user;
 };
 
+exports.authenticateAnyRole = async ({ email, password }) => {
+    validateAuthPayload({ email, password }, false);
+
+    const normalizedEmail = email.toLowerCase();
+    const users = await User.find({ email: normalizedEmail });
+
+    if (!users.length) {
+        throw new ApiError(401, 'Invalid credentials.');
+    }
+
+    for (const candidate of users) {
+        const passwordMatches = await bcrypt.compare(password, candidate.password);
+        if (passwordMatches) {
+            return candidate;
+        }
+    }
+
+    throw new ApiError(401, 'Invalid credentials.');
+};
+
 exports.registerUser = async ({ email, password, confirmPassword }, role) => {
     validateAuthPayload({ email, password, confirmPassword }, true);
 
