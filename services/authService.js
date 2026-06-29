@@ -18,10 +18,26 @@ const validateAuthPayload = ({ email, password, confirmPassword }, isSignup = fa
     }
 };
 
+const buildUserLookup = (identifier, role) => {
+    const trimmedIdentifier = String(identifier).trim();
+    const normalizedIdentifier = trimmedIdentifier.toLowerCase();
+
+    if (role === 'moderator') {
+        return {
+            $or: [
+                { email: normalizedIdentifier },
+                { moderatorId: trimmedIdentifier }
+            ]
+        };
+    }
+
+    return { email: normalizedIdentifier };
+};
+
 exports.authenticateUser = async ({ email, password }, role) => {
     validateAuthPayload({ email, password }, false);
 
-    const user = await User.findOne({ email: email.toLowerCase(), role });
+    const user = await User.findOne({ ...buildUserLookup(email, role), role });
     if (!user) {
         const roleLabel = role === 'moderator' ? 'moderator' : role === 'superadmin' ? 'super admin' : 'student';
         throw new ApiError(401, `Invalid ${roleLabel} credentials.`);
@@ -39,8 +55,14 @@ exports.authenticateUser = async ({ email, password }, role) => {
 exports.authenticateAnyRole = async ({ email, password }) => {
     validateAuthPayload({ email, password }, false);
 
-    const normalizedEmail = email.toLowerCase();
-    const users = await User.find({ email: normalizedEmail });
+    const trimmedIdentifier = String(email).trim();
+    const normalizedIdentifier = trimmedIdentifier.toLowerCase();
+    const users = await User.find({
+        $or: [
+            { email: normalizedIdentifier },
+            { moderatorId: trimmedIdentifier }
+        ]
+    });
 
     if (!users.length) {
         throw new ApiError(401, 'Invalid credentials.');
